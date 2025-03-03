@@ -8,6 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 import glob
 import numpy as np
 
+#function to download KITTI
 def download_kitti(url, save_path):
     if not os.path.exists(save_path):
         print(f"Downloading {url} ...")

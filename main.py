@@ -9,14 +9,13 @@ import numpy as np
 import glob
 import utils
 from utils import KITTIDataset
+
 # Define KITTI dataset URL
 KITTI_URL = "https://s3.eu-central-1.amazonaws.com/avg-kitti/data_object_image_2.zip"
 ANNOTATION_URL = "https://s3.eu-central-1.amazonaws.com/avg-kitti/data_object_label_2.zip"
 
 # Define dataset directory
 DATASET_DIR = "./kitti_dataset"
-
-# Function to download KITTI dataset
 
 # Download KITTI images and labels
 os.makedirs(DATASET_DIR, exist_ok=True)
