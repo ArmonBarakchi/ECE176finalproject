@@ -3,12 +3,13 @@ import urllib.request
 import tarfile
 import zipfile
 import torch
-from torch.utils.data import Dataset, DataLoader, Subset, random_split
 import cv2
+from torch.utils.data import Dataset, DataLoader, Subset, random_split
 import numpy as np
 import glob
 import utils
 from utils import KITTIDataset, kitti_collate_fn
+from InceptionNetwork import InceptionDetector, InceptionDetectionLoss, train_inception_model
 from Network import KITTIObjectDetector, DetectionLoss, train_model
 
 # Define KITTI dataset URL
