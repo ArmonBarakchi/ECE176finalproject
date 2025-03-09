@@ -68,7 +68,7 @@ def main(Network):
     if(Network == "ResNet18"):
         model = KITTIObjectDetector(num_classes=9)
         print("Training Resnet18")
-        trained_model, train_acc, val_acc = train_model(model, train_loader, val_loader, num_epochs=2, lr=0.001)
+        trained_model, train_acc, val_acc = train_model(model, train_loader, val_loader, num_epochs=20, lr=0.001)
     if(Network == "Inception"):
 
         model = KITTIObjectDetector(num_classes=9)
@@ -76,4 +76,4 @@ def main(Network):
         trained_model, train_acc, val_acc = train_inception_model(model, train_loader, val_loader, num_epochs=2, lr=2e-3)
 
 if __name__ == "__main__":
-    main(Network = "Inception")
+    main(Network = "ResNet18")
