@@ -6,6 +6,9 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torchvision.models as models
 
+from Network import DetectionLoss
+
+
 # 1. Define the KITTIObjectDetector using an Inception backbone
 class InceptionDetector(nn.Module):
     def __init__(self, num_classes=9, pretrained=True):
@@ -102,7 +105,7 @@ class InceptionDetectionLoss(nn.Module):
 # 3. Define the training function
 def train_inception_model(model, train_loader, val_loader, num_epochs=2, lr=0.001, device=torch.device('cpu')):
     model.to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=lr)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=5e-4)
     criterion = DetectionLoss()
 
     # Lists to store accuracy for each epoch
