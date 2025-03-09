@@ -81,7 +81,7 @@ class DetectionLoss(nn.Module):
 # 3. Define the training function
 def train_model(model, train_loader, val_loader, num_epochs=2, lr=0.001, device=torch.device('cpu')):
     model.to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=0.01)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay = 1e-3)
     criterion = DetectionLoss()
 
     # Lists to store accuracy for each epoch
