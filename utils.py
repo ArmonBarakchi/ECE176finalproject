@@ -1,12 +1,15 @@
 
-import os
 import urllib.request
 import zipfile
-import torch
+import matplotlib.pyplot as plt
 import cv2
-from torch.utils.data import Dataset, DataLoader
+import os
 import glob
 import numpy as np
+import torch
+from torch.utils.data import Dataset
+from torchvision import transforms
+from PIL import Image
 
 #function to download KITTI
 def download_kitti(url, save_path):
@@ -24,14 +27,6 @@ def extract_kitti(file_path, extract_to):
         zip_ref.extractall(extract_to)
     print(f"Extracted to {extract_to}")
 
-
-import os
-import glob
-import numpy as np
-import torch
-from torch.utils.data import Dataset
-from torchvision import transforms
-from PIL import Image
 
 
 class KITTIDataset(Dataset):
@@ -161,3 +156,121 @@ def kitti_collate_fn(batch):
     }
 
     return batched_images, batched_targets
+
+
+import cv2
+import numpy as np
+
+
+def draw_bboxes(image, bboxes, labels, class_names):
+    """
+    Draws bounding boxes and class labels on the image.
+    """
+    print(f"\n[DEBUG] Drawing BBoxes: {bboxes}")
+
+    if isinstance(image, torch.Tensor):
+        image = image.permute(1, 2, 0).cpu().numpy()
+        image = (image * 255).astype(np.uint8)
+
+    # Convert RGB to BGR for OpenCV
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    for bbox, label in zip(bboxes, labels):
+        x1, y1, x2, y2 = map(int, bbox)
+
+        # Ensure box has a valid size
+        if x2 > x1 and y2 > y1:
+            print(f"[DEBUG] Drawing bbox {bbox} for class {class_names[label]}")
+            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green box
+            class_name = class_names[label] if label < len(class_names) else "Unknown"
+            cv2.putText(image, class_name, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (0, 255, 0), 2)
+        else:
+            print(f"[DEBUG] Skipping invalid bbox: {bbox}")
+
+    return image
+
+
+
+import random
+
+def visualize_predictions(model, val_loader, class_names, num_images=5, device="cpu"):
+    """
+    Runs inference on a shuffled batch of validation images and draws predicted bounding boxes.
+    """
+    model.eval()
+    model.to(device)
+
+    # Get a random batch from val_loader
+    val_iter = iter(val_loader)
+    images, targets = next(val_iter)  # Fetch a batch
+
+    batch_size = images.shape[0]
+    num_images = min(num_images, batch_size)  # Ensure we don't exceed batch size
+    selected_indices = random.sample(range(batch_size), num_images)
+    images = images[selected_indices].to(device)
+
+    # Shuffle the original dataset list before picking images
+    image_dir = "./kitti_dataset/training/image_2"
+    original_image_paths = sorted(glob.glob(os.path.join(image_dir, "*.png")))
+    random.shuffle(original_image_paths)  # Ensures new images are chosen each time
+    selected_image_paths = [original_image_paths[i] for i in selected_indices]
+
+    # Get original image sizes
+    original_sizes = []
+    for img_path in selected_image_paths:
+        with Image.open(img_path) as img:
+            original_sizes.append(img.size)  # (width, height)
+
+    with torch.no_grad():
+        outputs = model(images)  # Run inference
+
+    for i, img_idx in enumerate(selected_indices):
+        original_img = Image.open(selected_image_paths[i])
+        orig_w, orig_h = original_sizes[i]
+
+        # Extract class predictions
+        pred_classes = torch.argmax(outputs["classes"][i], dim=0).cpu().numpy()
+        print(f"[DEBUG] Image {i}: Predicted Class Scores: {outputs['classes'][i].cpu().numpy()}")
+        print(f"[DEBUG] Selected Class: {class_names[pred_classes]}")
+
+        # Extract bounding boxes
+        pred_bboxes = outputs["bboxes"][i].cpu().numpy()
+        print(f"[DEBUG] Raw Bounding Boxes from Model: {pred_bboxes}")
+
+        if pred_bboxes.ndim == 1 and pred_bboxes.shape[0] == 4:
+            pred_bboxes = pred_bboxes.reshape(1, 4)
+        elif pred_bboxes.ndim == 0:
+            pred_bboxes = np.zeros((1, 4))
+
+        # Scale bounding boxes back to original image size
+        scaled_bboxes = []
+        for bbox in pred_bboxes:
+            x1, y1, x2, y2 = bbox
+            x1 = max(0, min(int(x1 * orig_w), orig_w - 1))
+            y1 = max(0, min(int(y1 * orig_h), orig_h - 1))
+            x2 = max(0, min(int(x2 * orig_w), orig_w - 1))
+            y2 = max(0, min(int(y2 * orig_h), orig_h - 1))
+
+            if x2 > x1 and y2 > y1 and (x2 - x1) > 5 and (y2 - y1) > 5:
+                scaled_bboxes.append([x1, y1, x2, y2])
+            else:
+                print(f"[DEBUG] Skipping invalid bbox after scaling: {[x1, y1, x2, y2]}")
+
+        scaled_bboxes = np.array(scaled_bboxes)
+        print(f"[DEBUG] Corrected Scaled Bounding Boxes: {scaled_bboxes}")
+
+        # Convert image for OpenCV
+        original_img = np.array(original_img)
+        original_img = cv2.cvtColor(original_img, cv2.COLOR_RGB2BGR)
+
+        # Draw bounding boxes on the original image
+        img_with_bboxes = draw_bboxes(original_img, scaled_bboxes, [pred_classes], class_names)
+
+        # Show image with bounding boxes
+        plt.figure(figsize=(5, 5))
+        plt.imshow(cv2.cvtColor(img_with_bboxes, cv2.COLOR_BGR2RGB))
+        plt.axis("off")
+        plt.title(f"Predicted: {class_names[pred_classes]}")
+        plt.show()
+
