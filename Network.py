@@ -1,15 +1,18 @@
 # Network.py
-
+import cv2
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torchvision.models as models
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import numpy as np
 
 # 1. Define the KITTIObjectDetector using a ResNet-18 backbone
-class KITTIObjectDetector(nn.Module):
+class KITTIObjectDetectorBB(nn.Module):
     def __init__(self, num_classes=9, backbone_name='resnet18', pretrained=True):
-        super(KITTIObjectDetector, self).__init__()
+        super(KITTIObjectDetectorBB, self).__init__()
         # Load a pre-trained ResNet model (now ResNet-18)
         resnet = models.__dict__[backbone_name](pretrained=pretrained)
         # Remove the fully connected layers and the average pool.
@@ -79,9 +82,9 @@ class DetectionLoss(nn.Module):
 
 
 # 3. Define the training function
-def train_model(model, train_loader, val_loader, num_epochs=2, lr=0.001, device=torch.device('cpu')):
+def train_modelBB(model, train_loader, val_loader, num_epochs=2, lr=0.001, device=torch.device('cpu')):
     model.to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay = 1e-3)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-3)
     criterion = DetectionLoss()
 
     # Lists to store accuracy for each epoch
@@ -108,7 +111,6 @@ def train_model(model, train_loader, val_loader, num_epochs=2, lr=0.001, device=
             running_loss += loss.item() * images.size(0)
 
             # Compute training accuracy for this batch
-            # For each image, pick the first valid target (where label != -1)
             for i in range(images.size(0)):
                 valid_indices = (targets['classes'][i] != -1).nonzero(as_tuple=True)[0]
                 if len(valid_indices) == 0:
@@ -156,4 +158,53 @@ def train_model(model, train_loader, val_loader, num_epochs=2, lr=0.001, device=
         print(
             f"Epoch {epoch + 1}/{num_epochs}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc * 100:.2f}%")
 
-    return model, train_accuracies, val_accuracies
+    # After training, collect 5 random correctly labeled validation images with predictions drawn
+    correct_images = []
+    model.eval()
+    with torch.no_grad():
+        for images, targets in val_loader:
+            images = images.to(device)
+            targets['classes'] = targets['classes'].to(device)
+            targets['bboxes'] = targets['bboxes'].to(device)
+            outputs = model(images)
+
+            for i in range(images.size(0)):
+                valid_indices = (targets['classes'][i] != -1).nonzero(as_tuple=True)[0]
+                if len(valid_indices) == 0:
+                    continue
+                gt_class = targets['classes'][i][valid_indices[0]]
+                pred_class = torch.argmax(outputs['classes'][i])
+                if pred_class == gt_class:
+                    # Convert image to numpy array (from tensor with shape (C, H, W))
+                    img_tensor = images[i].cpu()
+                    img_np = img_tensor.permute(1, 2, 0).numpy()  # Now (H, W, C)
+                    # Convert to uint8 image in 0-255 range (assuming images are in [0,1])
+                    img_np = (img_np * 255).astype("uint8")
+
+                    # Get the predicted bounding box (normalized coordinates)
+                    bbox = outputs['bboxes'][i].cpu().numpy()  # [x1, y1, x2, y2] in [0,1]
+                    # Convert normalized coordinates to pixel coordinates
+                    x1 = int(bbox[0].item() * img_np.shape[1])  # width
+                    y1 = int(bbox[1].item() * img_np.shape[0])  # height
+                    x2 = int(bbox[2].item() * img_np.shape[1])  # width
+                    y2 = int(bbox[3].item() * img_np.shape[0])  # height
+
+                    # Ensure coordinates are within image boundaries
+                    x1 = max(0, min(x1, img_np.shape[1]-1))
+                    y1 = max(0, min(y1, img_np.shape[0]-1))
+                    x2 = max(0, min(x2, img_np.shape[1]-1))
+                    y2 = max(0, min(y2, img_np.shape[0]-1))
+
+                    # Draw the bounding box and label on the image using OpenCV
+                    cv2.rectangle(img_np, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    label_text = f"Class {pred_class.item()}"
+                    cv2.putText(img_np, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.5, (0, 255, 0), 1)
+
+                    correct_images.append(img_np)
+    # Randomly select 5 images if more than 5 are found
+    import random
+    if len(correct_images) > 5:
+        correct_images = random.sample(correct_images, 5)
+
+    return model, train_accuracies, val_accuracies, correct_images
