@@ -1,12 +1,14 @@
 
-import os
+
 import urllib.request
 import zipfile
-import torch
-import cv2
-from torch.utils.data import Dataset, DataLoader
+import os
 import glob
 import numpy as np
+import torch
+from torch.utils.data import Dataset
+from torchvision import transforms
+from PIL import Image
 
 #function to download KITTI
 def download_kitti(url, save_path):
@@ -23,15 +25,6 @@ def extract_kitti(file_path, extract_to):
     with zipfile.ZipFile(file_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to)
     print(f"Extracted to {extract_to}")
-
-
-import os
-import glob
-import numpy as np
-import torch
-from torch.utils.data import Dataset
-from torchvision import transforms
-from PIL import Image
 
 
 class KITTIDataset(Dataset):
@@ -161,3 +154,64 @@ def kitti_collate_fn(batch):
     }
 
     return batched_images, batched_targets
+
+import matplotlib.pyplot as plt
+import cv2
+
+def predict_and_visualize(model, image_paths, img_size=(640, 192), device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    """
+    Loads images, runs inference with the trained model, and visualizes bounding box predictions.
+
+    Args:
+        model (KITTIObjectDetector): Trained model.
+        image_paths (list of str): List of image file paths.
+        img_size (tuple): Resized image dimensions (Width, Height).
+        device (torch.device): CUDA or CPU.
+    """
+    # Ensure model is in evaluation mode
+    model.to(device)
+    model.eval()
+
+    transform = transforms.Compose([
+        transforms.Resize(img_size),
+        transforms.ToTensor(),
+    ])
+
+    class_labels = ['Car', 'Van', 'Truck', 'Pedestrian', 'Person_sitting',
+                    'Cyclist', 'Tram', 'Misc', 'DontCare']
+
+    with torch.no_grad():
+        for image_path in image_paths:
+            # Load and preprocess the image
+            image = Image.open(image_path).convert('RGB')
+            input_tensor = transform(image).unsqueeze(0).to(device)  # (1, C, H, W)
+
+            # Run inference
+            outputs = model(input_tensor)
+
+            # Extract class scores and bounding boxes
+            class_scores = outputs['classes'].squeeze(0)  # (num_classes,)
+            bbox_preds = outputs['bboxes'].squeeze(0)  # (4,)
+
+            # Get the predicted class
+            pred_class_idx = torch.argmax(class_scores).item()
+            pred_class = class_labels[pred_class_idx]
+            pred_score = torch.softmax(class_scores, dim=0)[pred_class_idx].item()
+
+            # Convert bbox from normalized (0-1) to actual image coordinates
+            img_w, img_h = image.size
+            x1, y1, x2, y2 = bbox_preds.cpu().numpy() * np.array([img_w, img_h, img_w, img_h])
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+            # Display results
+            image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            cv2.rectangle(image_cv, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(image_cv, f"{pred_class} ({pred_score:.2f})", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+            # Convert back to RGB for Matplotlib
+            plt.figure(figsize=(8, 4))
+            plt.imshow(cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB))
+            plt.title(f"Prediction: {pred_class} ({pred_score:.2f})")
+            plt.axis("off")
+            plt.show()
